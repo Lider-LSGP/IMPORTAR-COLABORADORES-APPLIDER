@@ -31,7 +31,7 @@ from .utils import normalizar_texto
 # VALORES PADRÃO (usados quando a aba LISTAS não está disponível)
 # ══════════════════════════════════════════════════════════════════════════
 
-PADRAO_POSTOS_TB2 = ["GUIDONI", "CESAN", "TVV", "PORTMAC", "MULTILIFT", "BRITANIA"]
+PADRAO_POSTOS_TB2 = ["GUIDONI", "CESAN", "TVV", "PORTMAC", "MULTILIFT", "BRITANIA", "BRASITALIA"]
 PADRAO_POSTOS_VA_VPORTS = ["VPORTS", "MULTILIFT"]
 PADRAO_POSTOS_COFFEE_VPORTS = ["VPORTS", "MULTILIFT"]
 PADRAO_POSTOS_VT_CETURB = ["CETURB"]
