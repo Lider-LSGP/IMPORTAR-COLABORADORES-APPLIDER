@@ -266,17 +266,53 @@ def processar_layout(
     sind_norm     = arq_dom.get("Sindicato",        pd.Series([""] * len(arq_dom))).apply(normalizar_texto)
     cod_emp_clean = clean("Cód Emp")
 
-    # 4.6a — Regra do POSTO ADM: se o posto é administrativo/sede,
-    #        troca pelo posto ADM da empresa ANTES de consultar o mapa.
-    posto_resolvido = posto_norm.copy()
-    for i in range(len(posto_resolvido)):
-        if posto_eh_administrativo(posto_resolvido.iloc[i]):
-            posto_adm = resolver_posto_adm(cod_emp_clean.iloc[i], regras.empresa_para_posto_adm)
-            if posto_adm:
-                posto_resolvido.iloc[i] = normalizar_texto(posto_adm)
+    # ─── 4.6a — Regra do POSTO ADM (sede) por empresa ─────────────────
+    # Qualquer variação administrativa no Domínio ("ADM - SEDE",
+    # "ADM - ATIVA", "BASE - ADMINISTRATIVO", ...) vira o posto ADM
+    # OFICIAL da empresa no EasyApp (ex.: ATIVA → "ADM - ATIVA", id 501).
+    # A busca aceita o alvo tanto pelo Nome_Dominio quanto pelo
+    # Nome_EasyApp do mapeamento, e nunca deixa o campo vazio sem aviso.
+    mapa_postos_id   = mapa.get("MAPA_POSTOS_ID", {})
+    mapa_postos_nome = mapa.get("MAPA_POSTOS_NOME", {})
 
-    arq_lider["postotrabalho_id"]  = posto_resolvido.map(mapa.get("MAPA_POSTOS_ID"))
-    arq_lider["nomepostotrabalho"] = posto_resolvido.map(mapa.get("MAPA_POSTOS_NOME"))
+    # Mapa reverso: nome EasyApp (normalizado) → (id, nome oficial)
+    postos_por_nome_easy = {}
+    for chave_dom, nome_easy in mapa_postos_nome.items():
+        chave_easy = normalizar_texto(nome_easy)
+        if chave_easy and chave_easy not in postos_por_nome_easy:
+            postos_por_nome_easy[chave_easy] = (mapa_postos_id.get(chave_dom), nome_easy)
+
+    ids_posto, nomes_posto = [], []
+    for i in range(len(posto_norm)):
+        posto_atual = posto_norm.iloc[i]
+
+        if posto_eh_administrativo(posto_atual):
+            alvo = resolver_posto_adm(cod_emp_clean.iloc[i], regras.empresa_para_posto_adm)
+            alvo_norm = normalizar_texto(alvo) if alvo else ""
+
+            if alvo_norm and alvo_norm in mapa_postos_id:
+                # achou pelo nome do Domínio → sai o nome oficial EasyApp
+                ids_posto.append(mapa_postos_id[alvo_norm])
+                nomes_posto.append(mapa_postos_nome.get(alvo_norm))
+            elif alvo_norm and alvo_norm in postos_por_nome_easy:
+                # achou direto pelo nome EasyApp (ex.: "ADM - ATIVA")
+                _id, _nome = postos_por_nome_easy[alvo_norm]
+                ids_posto.append(_id)
+                nomes_posto.append(_nome)
+            elif posto_atual in mapa_postos_id:
+                # fallback: mantém o posto original do Domínio
+                ids_posto.append(mapa_postos_id[posto_atual])
+                nomes_posto.append(mapa_postos_nome.get(posto_atual))
+            else:
+                # não achou de jeito nenhum → vazio (o app marca em vermelho)
+                ids_posto.append(None)
+                nomes_posto.append(None)
+        else:
+            ids_posto.append(mapa_postos_id.get(posto_atual))
+            nomes_posto.append(mapa_postos_nome.get(posto_atual))
+
+    arq_lider["postotrabalho_id"]  = ids_posto
+    arq_lider["nomepostotrabalho"] = nomes_posto
 
     # 4.6b — Regra do MENOR APRENDIZ: < 18 anos → função 76.
     nascimento = arq_dom.get("Data nascimento", pd.Series([""] * len(arq_dom)))
