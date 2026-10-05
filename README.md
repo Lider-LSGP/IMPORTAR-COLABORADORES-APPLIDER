@@ -8,8 +8,8 @@ Aplicativo **Streamlit** que automatiza a importação de admissões da **Domín
 
 | Módulo | O que faz |
 |---|---|
-| 🧹 **Duplicados** | Cruza o Arquivo Domínio com a planilha de colaboradores exportada do sistema interno. Mostra **em vermelho** quem já está cadastrado (por CPF, com fallback por nome) e gera o **Arquivo Domínio LIMPO** (sem duplicados) em `.xlsx` e `.csv`. |
-| 1️⃣ **Importar Layout** | Domínio + Mapeamento → `Importar Layout.xlsx` (106 colunas, mesmas do modelo original). Células **sem Posto de Serviço, Função, Escala ou Horário ficam VERMELHAS** na planilha e no preview. |
+| 🧹 **Verificar Duplicados** *(menu separado na barra lateral)* | Módulo independente: cruza o Arquivo Domínio com a planilha de colaboradores exportada do sistema interno. Mostra **em vermelho** quem já está cadastrado (por CPF, com fallback por nome) e gera o **Arquivo Domínio LIMPO** (sem duplicados) em `.xlsx` e `.csv`. O Domínio Limpo fica em memória e pode ser usado direto no menu **📥 Importação AppLider**. |
+| 1️⃣ **Importar Layout** *(menu Importação AppLider)* | Domínio + Mapeamento → `Importar Layout.xlsx` (106 colunas, mesmas do modelo original). Células **sem Posto de Serviço, Função, Escala ou Horário ficam VERMELHAS** na planilha e no preview. |
 | 2️⃣ **Benefícios** | Layout + Relação de Benefícios → `Importar Beneficios.xlsx`. `colaborador_id` = matrícula eSocial **ou** **IDs sequenciais** a partir do último ID do EasyApp (com confirmação e mapa visual novo ID × matrícula × nome). |
 | 3️⃣ **Converter CSV** | Converte qualquer `.xlsx` em CSV **preservando zeros à esquerda** (CPF, PIS, matrícula, CEP). Os CSVs das etapas 1 e 2 já ficam prontos automaticamente. |
 | ⭐ **Executar Tudo** | Pipeline completo: Domínio → (remove duplicados, opcional) → Layout → Benefícios → CSVs, com **Central de Downloads** no final. |
@@ -31,6 +31,11 @@ streamlit run app.py
 
 1. Suba este repositório no GitHub (todos os arquivos, incluindo `data/` e `assets/`).
 2. Em [share.streamlit.io](https://share.streamlit.io): **New app** → selecione o repositório → arquivo `app.py` → **Deploy**.
+
+## 🗂️ Menus do app
+
+- **📥 Importação AppLider** — abas: 1️⃣ Importar Layout, 2️⃣ Benefícios, 3️⃣ Converter CSV, ⭐ Executar Tudo (pipeline completo + Central de Downloads).
+- **🧹 Verificar Duplicados** — página dedicada, isolada do fluxo de importação, para cruzar Domínio × sistema interno e gerar o Domínio LIMPO.
 
 ## 📁 Estrutura
 

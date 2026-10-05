@@ -193,6 +193,13 @@ with st.sidebar:
     logo = BASE_DIR / "assets" / "logo.png"
     if logo.exists():
         st.image(str(logo), width=110)
+
+    menu = st.radio(
+        "📂 Menu principal",
+        ["📥 Importação AppLider", "🧹 Verificar Duplicados"],
+        key="menu_principal",
+    )
+    st.markdown("---")
     st.markdown("## ⚙️ Arquivos base")
     st.caption("Se não enviar, o app usa os arquivos padrão embutidos no repositório (pasta `data/`).")
 
@@ -253,20 +260,12 @@ st.markdown(
 # ══════════════════════════════════════════════════════════════════════════
 # TABS
 # ══════════════════════════════════════════════════════════════════════════
-tab_dup, tab_layout, tab_benef, tab_csv, tab_all = st.tabs(
-    [
-        "🧹 Duplicados",
-        "1️⃣ Importar Layout",
-        "2️⃣ Benefícios",
-        "3️⃣ Converter CSV",
-        "⭐ Executar Tudo",
-    ]
-)
+MODO_DUP = menu.startswith("🧹")
 
 # ──────────────────────────────────────────────────────────────────────────
 # ABA 0 — DUPLICADOS
 # ──────────────────────────────────────────────────────────────────────────
-with tab_dup:
+if MODO_DUP:
     st.markdown(
         """
 <div class="card">
@@ -365,438 +364,443 @@ with tab_dup:
 
         if ss["df_dom_limpo"] is not None:
             st.info(
-                "💡 O **Domínio LIMPO** já está em memória: na aba **1️⃣ Importar Layout** e no **⭐ Executar Tudo** "
+                "💡 O **Domínio LIMPO** já está em memória: vá ao menu **📥 Importação AppLider** (aba **1️⃣ Importar Layout** ou **⭐ Executar Tudo**) "
                 "você pode usá-lo direto, sem reenviar arquivo."
             )
 
-# ──────────────────────────────────────────────────────────────────────────
-# ABA 1 — IMPORTAR LAYOUT
-# ──────────────────────────────────────────────────────────────────────────
-with tab_layout:
-    st.markdown(
-        """
-<div class="card">
-  <div class="card-title">1️⃣ Geração do Importar Layout (AppLider)</div>
-  <div class="card-sub">
-    Domínio + Mapeamento do Sistema → <b>Importar Layout.xlsx</b>.
-    Células sem <b>Posto de Serviço</b>, <b>Função</b>, <b>Escala</b> ou <b>Horário</b> ficam <b style="color:#FF8080">VERMELHAS</b> na planilha e no preview.
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
+if not MODO_DUP:
+    tab_layout, tab_benef, tab_csv, tab_all = st.tabs(
+        ["1️⃣ Importar Layout", "2️⃣ Benefícios", "3️⃣ Converter CSV", "⭐ Executar Tudo"]
     )
 
-    usar_limpo = False
-    if ss["df_dom_limpo"] is not None:
-        usar_limpo = st.checkbox(
-            f"🧹 Usar Domínio LIMPO da aba Duplicados ({len(ss['df_dom_limpo'])} registros)",
-            value=True,
-            key="chk_usar_limpo",
-        )
-
-    up_dom_layout = None
-    if not usar_limpo:
-        up_dom_layout = st.file_uploader(
-            "📄 Arquivo Domínio (.xls)", type=["xls", "xlsx"], key="layout_dom"
-        )
-
-    if st.button("🚀 Gerar Importar Layout", type="primary", key="btn_layout"):
-        base_mapa = get_base_bytes(up_mapa, "Mapeamento Sistema.xls")
-        base_modelo = get_base_bytes(up_modelo, "Colunas Originais.xlsx")
-
-        if base_mapa is None or base_modelo is None:
-            st.error(
-                "Faltam arquivos base: envie **Mapeamento Sistema.xls** e **Colunas Originais.xlsx** na barra lateral."
-            )
-        elif not usar_limpo and up_dom_layout is None:
-            st.warning("Envie o Arquivo Domínio.")
-        else:
-            with st.spinner("Processando layout..."):
-                try:
-                    df_dom = (
-                        ss["df_dom_limpo"].copy()
-                        if usar_limpo
-                        else read_excel_smart(up_dom_layout, dtype=str)
-                    )
-                    mapas = carregar_todos_os_mapas(io.BytesIO(base_mapa))
-                    colunas = list(pd.read_excel(io.BytesIO(base_modelo), nrows=0).columns)
-
-                    df_layout, pendencias = processar_layout(df_dom, mapas, colunas)
-                    ss["df_layout"] = df_layout
-                    ss["layout_pend"] = pendencias
-
-                    xlsx = df_to_xlsx_bytes(df_layout, red_cells=pendencias)
-                    put_art("layout_xlsx", xlsx, "Importar Layout.xlsx", XLSX_MIME)
-                    put_art(
-                        "layout_csv",
-                        xlsx_bytes_to_csv_bytes(xlsx),
-                        "Importar Layout.csv",
-                        "text/csv",
-                    )
-                    st.success(f"✅ Layout gerado: {len(df_layout)} colaborador(es).")
-                except Exception as e:
-                    st.error(f"Erro ao gerar layout: {e}")
-
-    if ss["df_layout"] is not None:
-        df = ss["df_layout"]
-        pend = ss.get("layout_pend", [])
-
-        faltas = {c: 0 for c in CAMPOS_OBRIGATORIOS}
-        for _, c in pend:
-            faltas[c] = faltas.get(c, 0) + 1
-
-        metricas(
-            [
-                ("Colaboradores", len(df)),
-                ("Sem Posto", faltas.get("postotrabalho_id", 0)),
-                ("Sem Função", faltas.get("funcao_id", 0)),
-                ("Sem Escala", faltas.get("escalatrabalho_id", 0)),
-                ("Sem Horário", faltas.get("horariotrabalho_id", 0)),
-            ]
-        )
-
-        if pend:
-            st.markdown(
-                '<div class="legend"><span class="box"></span> Células vermelhas = informação faltando (Posto / Função / Escala / Horário). Corrija antes de importar.</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.success("✅ Nenhuma pendência em Posto, Função, Escala ou Horário.")
-
-        preview_cols = [
-            c
-            for c in [
-                "nome",
-                "matricula",
-                "cpf",
-                "nomepostotrabalho",
-                "postotrabalho_id",
-                "nomefuncao",
-                "funcao_id",
-                "tipoescala",
-                "escalatrabalho_id",
-                "nomehorariotrabalho",
-                "horariotrabalho_id",
-            ]
-            if c in df.columns
-        ]
-        st.dataframe(
-            style_missing(df[preview_cols].head(150)),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-        d1, d2 = st.columns(2)
-        with d1:
-            dl("layout_xlsx", "⬇️ Importar Layout.xlsx (com vermelhos)")
-        with d2:
-            dl("layout_csv", "⬇️ Importar Layout.csv")
-
-# ──────────────────────────────────────────────────────────────────────────
-# ABA 2 — BENEFÍCIOS
-# ──────────────────────────────────────────────────────────────────────────
-with tab_benef:
-    st.markdown(
-        """
-<div class="card">
-  <div class="card-title">2️⃣ Geração do Importar Benefícios</div>
-  <div class="card-sub">
-    Usa o <b>Importar Layout</b> (desta sessão ou enviado) + a <b>Relação de Benefícios</b>.
-    Você escolhe o <b>colaborador_id</b>: matrícula eSocial (padrão) ou <b>IDs em sequência</b> a partir do último ID do EasyApp.
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-    df_func = ss["df_layout"]
-    if df_func is None:
-        up_layout_benef = st.file_uploader(
-            "📄 Importar Layout.xlsx (gerado na etapa 1)",
-            type=["xlsx"],
-            key="benef_layout",
-        )
-        if up_layout_benef is not None:
-            df_func = pd.read_excel(up_layout_benef)
-    else:
-        st.caption(f"📎 Usando o Importar Layout desta sessão ({len(df_func)} colaboradores).")
-
-    modo = st.radio(
-        "Como preencher o colaborador_id?",
-        ["Matrícula eSocial (comportamento original)", "IDs sequenciais a partir do último ID EasyApp"],
-        key="modo_benef",
-    )
-
-    confirmado = True
-    if modo.startswith("IDs sequenciais"):
-        st.info(
-            f"🔢 Último ID salvo: **{ss['ultimo_id']}** → o primeiro novo colaborador receberá **{ss['ultimo_id'] + 1}** "
-            "(altere na barra lateral, se preciso)."
-        )
-        confirmado = st.checkbox(
-            f"✅ Confirmo que **{ss['ultimo_id']}** é o último ID cadastrado no EasyApp",
-            key="chk_confirma_id",
-        )
-
-    if st.button("🎁 Gerar Benefícios", type="primary", key="btn_benef"):
-        base_benef = get_base_bytes(up_benef, "BENEFICIOS - RELACAO.xlsx")
-        if df_func is None:
-            st.warning("Gere o Importar Layout na etapa 1 (ou envie o arquivo acima).")
-        elif base_benef is None:
-            st.error("Falta a **Relação de Benefícios** (envie na barra lateral).")
-        elif not confirmado:
-            st.warning("Confirme o último ID antes de gerar em sequência.")
-        else:
-            with st.spinner("Calculando benefícios..."):
-                try:
-                    df_benef = pd.read_excel(io.BytesIO(base_benef), sheet_name="BENEFICIOS")
-                    modo_key = "sequencial" if modo.startswith("IDs") else "esocial"
-                    df_saida, mapa_ids, stats = processar_beneficios_df(
-                        df_func, df_benef, modo=modo_key, ultimo_id=ss["ultimo_id"]
-                    )
-
-                    xlsx = beneficios_xlsx_bytes(df_saida)
-                    put_art("benef_xlsx", xlsx, "Importar Beneficios.xlsx", XLSX_MIME)
-                    put_art(
-                        "benef_csv",
-                        xlsx_bytes_to_csv_bytes(xlsx),
-                        "Importar Beneficios.csv",
-                        "text/csv",
-                    )
-                    ss["mapa_ids"] = mapa_ids
-                    ss["benef_stats"] = stats
-
-                    if modo_key == "sequencial" and mapa_ids is not None and len(mapa_ids):
-                        ss["ultimo_id"] = int(mapa_ids["novo_id"].max())
-
-                    st.success(
-                        f"✅ Benefícios gerados: {stats['linhas']} linha(s) para {stats['colaboradores']} colaborador(es)."
-                    )
-                except Exception as e:
-                    st.error(f"Erro ao gerar benefícios: {e}")
-
-    if ss.get("benef_stats"):
-        stats = ss["benef_stats"]
-        metricas(
-            [
-                ("Colaboradores", stats["colaboradores"]),
-                ("Linhas de benefício", stats["linhas"]),
-                ("Sem benefício", stats["sem_beneficio"]),
-            ]
-        )
-        if stats["sem_beneficio"]:
-            st.warning(
-                f"⚠️ {stats['sem_beneficio']} linha(s) ficaram sem benefício (regra não encontrada)."
-            )
-
-        mapa_ids = ss.get("mapa_ids")
-        if mapa_ids is not None and len(mapa_ids):
-            st.markdown(
-                '<div class="card-sub">🔢 <b>Mapa de IDs gerados</b> — novo ID × matrícula eSocial × nome:</div>',
-                unsafe_allow_html=True,
-            )
-            st.dataframe(mapa_ids, use_container_width=True, hide_index=True)
-
+    # ──────────────────────────────────────────────────────────────────────────
+    # ABA 1 — IMPORTAR LAYOUT
+    # ──────────────────────────────────────────────────────────────────────────
+    with tab_layout:
         st.markdown(
-            '<div class="legend legend-blue"><span class="box"></span> No Excel: <b>azul</b> = colaborador com mais de um benefício &nbsp;•&nbsp; <b>vermelho</b> = colaborador com um único benefício (regra original)</div>',
+            """
+    <div class="card">
+      <div class="card-title">1️⃣ Geração do Importar Layout (AppLider)</div>
+      <div class="card-sub">
+        Domínio + Mapeamento do Sistema → <b>Importar Layout.xlsx</b>.
+        Células sem <b>Posto de Serviço</b>, <b>Função</b>, <b>Escala</b> ou <b>Horário</b> ficam <b style="color:#FF8080">VERMELHAS</b> na planilha e no preview.
+      </div>
+    </div>
+    """,
             unsafe_allow_html=True,
         )
 
-        d1, d2 = st.columns(2)
-        with d1:
-            dl("benef_xlsx", "⬇️ Importar Beneficios.xlsx")
-        with d2:
-            dl("benef_csv", "⬇️ Importar Beneficios.csv")
+        usar_limpo = False
+        if ss["df_dom_limpo"] is not None:
+            usar_limpo = st.checkbox(
+                f"🧹 Usar Domínio LIMPO da aba Duplicados ({len(ss['df_dom_limpo'])} registros)",
+                value=True,
+                key="chk_usar_limpo",
+            )
 
-# ──────────────────────────────────────────────────────────────────────────
-# ABA 3 — CONVERTER CSV
-# ──────────────────────────────────────────────────────────────────────────
-with tab_csv:
-    st.markdown(
-        """
-<div class="card">
-  <div class="card-title">3️⃣ Conversão para CSV</div>
-  <div class="card-sub">
-    Converte qualquer .xlsx em CSV <b>preservando zeros à esquerda</b> (CPF, PIS, matrícula, CEP) — mesma regra do conversor original.
-    Os CSVs das etapas 1 e 2 já são gerados automaticamente e ficam prontos aqui para baixar quando quiser.
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+        up_dom_layout = None
+        if not usar_limpo:
+            up_dom_layout = st.file_uploader(
+                "📄 Arquivo Domínio (.xls)", type=["xls", "xlsx"], key="layout_dom"
+            )
 
-    st.markdown('<div class="card-sub">📦 CSVs já gerados nesta sessão:</div>', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        ok1 = dl("layout_csv", "⬇️ Importar Layout.csv")
-    with c2:
-        ok2 = dl("benef_csv", "⬇️ Importar Beneficios.csv")
-    if not ok1 and not ok2:
-        st.caption("Nenhum CSV gerado ainda — rode as etapas 1/2 ou use o conversor avulso abaixo.")
+        if st.button("🚀 Gerar Importar Layout", type="primary", key="btn_layout"):
+            base_mapa = get_base_bytes(up_mapa, "Mapeamento Sistema.xls")
+            base_modelo = get_base_bytes(up_modelo, "Colunas Originais.xlsx")
 
-    st.markdown("---")
-    st.markdown('<div class="card-sub">🔄 Conversor avulso (qualquer .xlsx):</div>', unsafe_allow_html=True)
-    up_any = st.file_uploader("Enviar .xlsx para converter", type=["xlsx"], key="any_xlsx")
-    if up_any is not None and st.button("Converter para CSV", key="btn_any_csv"):
-        with st.spinner("Convertendo..."):
-            csv_bytes = xlsx_bytes_to_csv_bytes(up_any.getvalue())
-            nome = Path(up_any.name).stem + ".csv"
-            put_art("custom_csv", csv_bytes, nome, "text/csv")
-        st.success(f"✅ {nome} pronto.")
-    dl("custom_csv", "⬇️ Baixar CSV convertido")
-
-# ──────────────────────────────────────────────────────────────────────────
-# ABA 4 — EXECUTAR TUDO
-# ──────────────────────────────────────────────────────────────────────────
-with tab_all:
-    st.markdown(
-        """
-<div class="card">
-  <div class="card-title">⭐ Pipeline completo: Domínio → (sem duplicados) → Layout → Benefícios → CSVs</div>
-  <div class="card-sub">
-    Roda tudo de uma vez. Ao final, <b>todos os arquivos ficam prontos na Central de Downloads</b>:
-    baixe um por um, na ordem que quiser, <b>sem refazer o processamento</b>.
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-    c1, c2 = st.columns(2)
-    with c1:
-        up_dom_all = st.file_uploader(
-            "📄 Arquivo Domínio (.xls)", type=["xls", "xlsx"], key="all_dom"
-        )
-    with c2:
-        up_sis_all = st.file_uploader(
-            "🏢 Sistema interno (opcional — remove duplicados)",
-            type=["xls", "xlsx"],
-            key="all_sis",
-        )
-
-    modo_all = st.radio(
-        "colaborador_id nos benefícios:",
-        ["Matrícula eSocial", "IDs sequenciais (último ID da barra lateral)"],
-        key="modo_all",
-        horizontal=True,
-    )
-    confirma_all = True
-    if modo_all.startswith("IDs"):
-        confirma_all = st.checkbox(
-            f"✅ Confirmo que **{ss['ultimo_id']}** é o último ID do EasyApp",
-            key="chk_confirma_all",
-        )
-
-    if st.button("▶️ EXECUTAR TUDO", type="primary", key="btn_all"):
-        base_mapa = get_base_bytes(up_mapa, "Mapeamento Sistema.xls")
-        base_modelo = get_base_bytes(up_modelo, "Colunas Originais.xlsx")
-        base_benef = get_base_bytes(up_benef, "BENEFICIOS - RELACAO.xlsx")
-
-        if up_dom_all is None:
-            st.warning("Envie o Arquivo Domínio.")
-        elif base_mapa is None or base_modelo is None or base_benef is None:
-            st.error("Faltam arquivos base na barra lateral (Mapeamento / Modelo / Benefícios).")
-        elif not confirma_all:
-            st.warning("Confirme o último ID antes de rodar com IDs sequenciais.")
-        else:
-            with st.status("Executando pipeline completo...", expanded=True) as status:
-                try:
-                    # 0) Domínio
-                    st.write("📄 Lendo Arquivo Domínio...")
-                    df_dom = read_excel_smart(up_dom_all, dtype=str)
-
-                    # 0.5) Duplicados (opcional)
-                    if up_sis_all is not None:
-                        st.write("🧹 Removendo duplicados com base no sistema interno...")
-                        df_sis = read_excel_smart(up_sis_all, dtype=str)
-                        dupes, limpo, stats_dup = comparar_colaboradores(df_dom, df_sis)
-                        ss["df_dom_limpo"] = limpo
-                        ss["dup_stats"] = stats_dup
-                        ss["df_dupes"] = dupes
-                        put_art(
-                            "dom_limpo_xlsx",
-                            df_to_xlsx_bytes(limpo),
-                            "Arquivo Dominio_LIMPO.xlsx",
-                            XLSX_MIME,
+            if base_mapa is None or base_modelo is None:
+                st.error(
+                    "Faltam arquivos base: envie **Mapeamento Sistema.xls** e **Colunas Originais.xlsx** na barra lateral."
+                )
+            elif not usar_limpo and up_dom_layout is None:
+                st.warning("Envie o Arquivo Domínio.")
+            else:
+                with st.spinner("Processando layout..."):
+                    try:
+                        df_dom = (
+                            ss["df_dom_limpo"].copy()
+                            if usar_limpo
+                            else read_excel_smart(up_dom_layout, dtype=str)
                         )
-                        if not dupes.empty:
+                        mapas = carregar_todos_os_mapas(io.BytesIO(base_mapa))
+                        colunas = list(pd.read_excel(io.BytesIO(base_modelo), nrows=0).columns)
+
+                        df_layout, pendencias = processar_layout(df_dom, mapas, colunas)
+                        ss["df_layout"] = df_layout
+                        ss["layout_pend"] = pendencias
+
+                        xlsx = df_to_xlsx_bytes(df_layout, red_cells=pendencias)
+                        put_art("layout_xlsx", xlsx, "Importar Layout.xlsx", XLSX_MIME)
+                        put_art(
+                            "layout_csv",
+                            xlsx_bytes_to_csv_bytes(xlsx),
+                            "Importar Layout.csv",
+                            "text/csv",
+                        )
+                        st.success(f"✅ Layout gerado: {len(df_layout)} colaborador(es).")
+                    except Exception as e:
+                        st.error(f"Erro ao gerar layout: {e}")
+
+        if ss["df_layout"] is not None:
+            df = ss["df_layout"]
+            pend = ss.get("layout_pend", [])
+
+            faltas = {c: 0 for c in CAMPOS_OBRIGATORIOS}
+            for _, c in pend:
+                faltas[c] = faltas.get(c, 0) + 1
+
+            metricas(
+                [
+                    ("Colaboradores", len(df)),
+                    ("Sem Posto", faltas.get("postotrabalho_id", 0)),
+                    ("Sem Função", faltas.get("funcao_id", 0)),
+                    ("Sem Escala", faltas.get("escalatrabalho_id", 0)),
+                    ("Sem Horário", faltas.get("horariotrabalho_id", 0)),
+                ]
+            )
+
+            if pend:
+                st.markdown(
+                    '<div class="legend"><span class="box"></span> Células vermelhas = informação faltando (Posto / Função / Escala / Horário). Corrija antes de importar.</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.success("✅ Nenhuma pendência em Posto, Função, Escala ou Horário.")
+
+            preview_cols = [
+                c
+                for c in [
+                    "nome",
+                    "matricula",
+                    "cpf",
+                    "nomepostotrabalho",
+                    "postotrabalho_id",
+                    "nomefuncao",
+                    "funcao_id",
+                    "tipoescala",
+                    "escalatrabalho_id",
+                    "nomehorariotrabalho",
+                    "horariotrabalho_id",
+                ]
+                if c in df.columns
+            ]
+            st.dataframe(
+                style_missing(df[preview_cols].head(150)),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            d1, d2 = st.columns(2)
+            with d1:
+                dl("layout_xlsx", "⬇️ Importar Layout.xlsx (com vermelhos)")
+            with d2:
+                dl("layout_csv", "⬇️ Importar Layout.csv")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ABA 2 — BENEFÍCIOS
+    # ──────────────────────────────────────────────────────────────────────────
+    with tab_benef:
+        st.markdown(
+            """
+    <div class="card">
+      <div class="card-title">2️⃣ Geração do Importar Benefícios</div>
+      <div class="card-sub">
+        Usa o <b>Importar Layout</b> (desta sessão ou enviado) + a <b>Relação de Benefícios</b>.
+        Você escolhe o <b>colaborador_id</b>: matrícula eSocial (padrão) ou <b>IDs em sequência</b> a partir do último ID do EasyApp.
+      </div>
+    </div>
+    """,
+            unsafe_allow_html=True,
+        )
+
+        df_func = ss["df_layout"]
+        if df_func is None:
+            up_layout_benef = st.file_uploader(
+                "📄 Importar Layout.xlsx (gerado na etapa 1)",
+                type=["xlsx"],
+                key="benef_layout",
+            )
+            if up_layout_benef is not None:
+                df_func = pd.read_excel(up_layout_benef)
+        else:
+            st.caption(f"📎 Usando o Importar Layout desta sessão ({len(df_func)} colaboradores).")
+
+        modo = st.radio(
+            "Como preencher o colaborador_id?",
+            ["Matrícula eSocial (comportamento original)", "IDs sequenciais a partir do último ID EasyApp"],
+            key="modo_benef",
+        )
+
+        confirmado = True
+        if modo.startswith("IDs sequenciais"):
+            st.info(
+                f"🔢 Último ID salvo: **{ss['ultimo_id']}** → o primeiro novo colaborador receberá **{ss['ultimo_id'] + 1}** "
+                "(altere na barra lateral, se preciso)."
+            )
+            confirmado = st.checkbox(
+                f"✅ Confirmo que **{ss['ultimo_id']}** é o último ID cadastrado no EasyApp",
+                key="chk_confirma_id",
+            )
+
+        if st.button("🎁 Gerar Benefícios", type="primary", key="btn_benef"):
+            base_benef = get_base_bytes(up_benef, "BENEFICIOS - RELACAO.xlsx")
+            if df_func is None:
+                st.warning("Gere o Importar Layout na etapa 1 (ou envie o arquivo acima).")
+            elif base_benef is None:
+                st.error("Falta a **Relação de Benefícios** (envie na barra lateral).")
+            elif not confirmado:
+                st.warning("Confirme o último ID antes de gerar em sequência.")
+            else:
+                with st.spinner("Calculando benefícios..."):
+                    try:
+                        df_benef = pd.read_excel(io.BytesIO(base_benef), sheet_name="BENEFICIOS")
+                        modo_key = "sequencial" if modo.startswith("IDs") else "esocial"
+                        df_saida, mapa_ids, stats = processar_beneficios_df(
+                            df_func, df_benef, modo=modo_key, ultimo_id=ss["ultimo_id"]
+                        )
+
+                        xlsx = beneficios_xlsx_bytes(df_saida)
+                        put_art("benef_xlsx", xlsx, "Importar Beneficios.xlsx", XLSX_MIME)
+                        put_art(
+                            "benef_csv",
+                            xlsx_bytes_to_csv_bytes(xlsx),
+                            "Importar Beneficios.csv",
+                            "text/csv",
+                        )
+                        ss["mapa_ids"] = mapa_ids
+                        ss["benef_stats"] = stats
+
+                        if modo_key == "sequencial" and mapa_ids is not None and len(mapa_ids):
+                            ss["ultimo_id"] = int(mapa_ids["novo_id"].max())
+
+                        st.success(
+                            f"✅ Benefícios gerados: {stats['linhas']} linha(s) para {stats['colaboradores']} colaborador(es)."
+                        )
+                    except Exception as e:
+                        st.error(f"Erro ao gerar benefícios: {e}")
+
+        if ss.get("benef_stats"):
+            stats = ss["benef_stats"]
+            metricas(
+                [
+                    ("Colaboradores", stats["colaboradores"]),
+                    ("Linhas de benefício", stats["linhas"]),
+                    ("Sem benefício", stats["sem_beneficio"]),
+                ]
+            )
+            if stats["sem_beneficio"]:
+                st.warning(
+                    f"⚠️ {stats['sem_beneficio']} linha(s) ficaram sem benefício (regra não encontrada)."
+                )
+
+            mapa_ids = ss.get("mapa_ids")
+            if mapa_ids is not None and len(mapa_ids):
+                st.markdown(
+                    '<div class="card-sub">🔢 <b>Mapa de IDs gerados</b> — novo ID × matrícula eSocial × nome:</div>',
+                    unsafe_allow_html=True,
+                )
+                st.dataframe(mapa_ids, use_container_width=True, hide_index=True)
+
+            st.markdown(
+                '<div class="legend legend-blue"><span class="box"></span> No Excel: <b>azul</b> = colaborador com mais de um benefício &nbsp;•&nbsp; <b>vermelho</b> = colaborador com um único benefício (regra original)</div>',
+                unsafe_allow_html=True,
+            )
+
+            d1, d2 = st.columns(2)
+            with d1:
+                dl("benef_xlsx", "⬇️ Importar Beneficios.xlsx")
+            with d2:
+                dl("benef_csv", "⬇️ Importar Beneficios.csv")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ABA 3 — CONVERTER CSV
+    # ──────────────────────────────────────────────────────────────────────────
+    with tab_csv:
+        st.markdown(
+            """
+    <div class="card">
+      <div class="card-title">3️⃣ Conversão para CSV</div>
+      <div class="card-sub">
+        Converte qualquer .xlsx em CSV <b>preservando zeros à esquerda</b> (CPF, PIS, matrícula, CEP) — mesma regra do conversor original.
+        Os CSVs das etapas 1 e 2 já são gerados automaticamente e ficam prontos aqui para baixar quando quiser.
+      </div>
+    </div>
+    """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('<div class="card-sub">📦 CSVs já gerados nesta sessão:</div>', unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
+        with c1:
+            ok1 = dl("layout_csv", "⬇️ Importar Layout.csv")
+        with c2:
+            ok2 = dl("benef_csv", "⬇️ Importar Beneficios.csv")
+        if not ok1 and not ok2:
+            st.caption("Nenhum CSV gerado ainda — rode as etapas 1/2 ou use o conversor avulso abaixo.")
+
+        st.markdown("---")
+        st.markdown('<div class="card-sub">🔄 Conversor avulso (qualquer .xlsx):</div>', unsafe_allow_html=True)
+        up_any = st.file_uploader("Enviar .xlsx para converter", type=["xlsx"], key="any_xlsx")
+        if up_any is not None and st.button("Converter para CSV", key="btn_any_csv"):
+            with st.spinner("Convertendo..."):
+                csv_bytes = xlsx_bytes_to_csv_bytes(up_any.getvalue())
+                nome = Path(up_any.name).stem + ".csv"
+                put_art("custom_csv", csv_bytes, nome, "text/csv")
+            st.success(f"✅ {nome} pronto.")
+        dl("custom_csv", "⬇️ Baixar CSV convertido")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # ABA 4 — EXECUTAR TUDO
+    # ──────────────────────────────────────────────────────────────────────────
+    with tab_all:
+        st.markdown(
+            """
+    <div class="card">
+      <div class="card-title">⭐ Pipeline completo: Domínio → (sem duplicados) → Layout → Benefícios → CSVs</div>
+      <div class="card-sub">
+        Roda tudo de uma vez. Ao final, <b>todos os arquivos ficam prontos na Central de Downloads</b>:
+        baixe um por um, na ordem que quiser, <b>sem refazer o processamento</b>.
+      </div>
+    </div>
+    """,
+            unsafe_allow_html=True,
+        )
+
+        c1, c2 = st.columns(2)
+        with c1:
+            up_dom_all = st.file_uploader(
+                "📄 Arquivo Domínio (.xls)", type=["xls", "xlsx"], key="all_dom"
+            )
+        with c2:
+            up_sis_all = st.file_uploader(
+                "🏢 Sistema interno (opcional — remove duplicados)",
+                type=["xls", "xlsx"],
+                key="all_sis",
+            )
+
+        modo_all = st.radio(
+            "colaborador_id nos benefícios:",
+            ["Matrícula eSocial", "IDs sequenciais (último ID da barra lateral)"],
+            key="modo_all",
+            horizontal=True,
+        )
+        confirma_all = True
+        if modo_all.startswith("IDs"):
+            confirma_all = st.checkbox(
+                f"✅ Confirmo que **{ss['ultimo_id']}** é o último ID do EasyApp",
+                key="chk_confirma_all",
+            )
+
+        if st.button("▶️ EXECUTAR TUDO", type="primary", key="btn_all"):
+            base_mapa = get_base_bytes(up_mapa, "Mapeamento Sistema.xls")
+            base_modelo = get_base_bytes(up_modelo, "Colunas Originais.xlsx")
+            base_benef = get_base_bytes(up_benef, "BENEFICIOS - RELACAO.xlsx")
+
+            if up_dom_all is None:
+                st.warning("Envie o Arquivo Domínio.")
+            elif base_mapa is None or base_modelo is None or base_benef is None:
+                st.error("Faltam arquivos base na barra lateral (Mapeamento / Modelo / Benefícios).")
+            elif not confirma_all:
+                st.warning("Confirme o último ID antes de rodar com IDs sequenciais.")
+            else:
+                with st.status("Executando pipeline completo...", expanded=True) as status:
+                    try:
+                        # 0) Domínio
+                        st.write("📄 Lendo Arquivo Domínio...")
+                        df_dom = read_excel_smart(up_dom_all, dtype=str)
+
+                        # 0.5) Duplicados (opcional)
+                        if up_sis_all is not None:
+                            st.write("🧹 Removendo duplicados com base no sistema interno...")
+                            df_sis = read_excel_smart(up_sis_all, dtype=str)
+                            dupes, limpo, stats_dup = comparar_colaboradores(df_dom, df_sis)
+                            ss["df_dom_limpo"] = limpo
+                            ss["dup_stats"] = stats_dup
+                            ss["df_dupes"] = dupes
                             put_art(
-                                "dupes_xlsx",
-                                df_to_xlsx_bytes(dupes, red_all=True),
-                                "Relacao_Duplicados.xlsx",
+                                "dom_limpo_xlsx",
+                                df_to_xlsx_bytes(limpo),
+                                "Arquivo Dominio_LIMPO.xlsx",
                                 XLSX_MIME,
                             )
-                        st.write(f"   → {stats_dup['duplicados']} duplicado(s) removido(s), {stats_dup['novos']} novo(s).")
-                        df_dom = limpo
+                            if not dupes.empty:
+                                put_art(
+                                    "dupes_xlsx",
+                                    df_to_xlsx_bytes(dupes, red_all=True),
+                                    "Relacao_Duplicados.xlsx",
+                                    XLSX_MIME,
+                                )
+                            st.write(f"   → {stats_dup['duplicados']} duplicado(s) removido(s), {stats_dup['novos']} novo(s).")
+                            df_dom = limpo
 
-                    # 1) Layout
-                    st.write("1️⃣ Gerando Importar Layout...")
-                    mapas = carregar_todos_os_mapas(io.BytesIO(base_mapa))
-                    colunas = list(pd.read_excel(io.BytesIO(base_modelo), nrows=0).columns)
-                    df_layout, pendencias = processar_layout(df_dom, mapas, colunas)
-                    ss["df_layout"] = df_layout
-                    ss["layout_pend"] = pendencias
-                    xlsx_layout = df_to_xlsx_bytes(df_layout, red_cells=pendencias)
-                    put_art("layout_xlsx", xlsx_layout, "Importar Layout.xlsx", XLSX_MIME)
-                    put_art(
-                        "layout_csv",
-                        xlsx_bytes_to_csv_bytes(xlsx_layout),
-                        "Importar Layout.csv",
-                        "text/csv",
-                    )
-                    st.write(f"   → {len(df_layout)} colaborador(es), {len(pendencias)} célula(s) em vermelho.")
+                        # 1) Layout
+                        st.write("1️⃣ Gerando Importar Layout...")
+                        mapas = carregar_todos_os_mapas(io.BytesIO(base_mapa))
+                        colunas = list(pd.read_excel(io.BytesIO(base_modelo), nrows=0).columns)
+                        df_layout, pendencias = processar_layout(df_dom, mapas, colunas)
+                        ss["df_layout"] = df_layout
+                        ss["layout_pend"] = pendencias
+                        xlsx_layout = df_to_xlsx_bytes(df_layout, red_cells=pendencias)
+                        put_art("layout_xlsx", xlsx_layout, "Importar Layout.xlsx", XLSX_MIME)
+                        put_art(
+                            "layout_csv",
+                            xlsx_bytes_to_csv_bytes(xlsx_layout),
+                            "Importar Layout.csv",
+                            "text/csv",
+                        )
+                        st.write(f"   → {len(df_layout)} colaborador(es), {len(pendencias)} célula(s) em vermelho.")
 
-                    # 2) Benefícios
-                    st.write("2️⃣ Gerando Importar Benefícios...")
-                    df_benef = pd.read_excel(io.BytesIO(base_benef), sheet_name="BENEFICIOS")
-                    modo_key = "sequencial" if modo_all.startswith("IDs") else "esocial"
-                    df_saida, mapa_ids, stats_b = processar_beneficios_df(
-                        df_layout, df_benef, modo=modo_key, ultimo_id=ss["ultimo_id"]
-                    )
-                    xlsx_benef = beneficios_xlsx_bytes(df_saida)
-                    put_art("benef_xlsx", xlsx_benef, "Importar Beneficios.xlsx", XLSX_MIME)
-                    put_art(
-                        "benef_csv",
-                        xlsx_bytes_to_csv_bytes(xlsx_benef),
-                        "Importar Beneficios.csv",
-                        "text/csv",
-                    )
-                    ss["mapa_ids"] = mapa_ids
-                    ss["benef_stats"] = stats_b
-                    if modo_key == "sequencial" and mapa_ids is not None and len(mapa_ids):
-                        ss["ultimo_id"] = int(mapa_ids["novo_id"].max())
-                    st.write(f"   → {stats_b['linhas']} linha(s) de benefício.")
+                        # 2) Benefícios
+                        st.write("2️⃣ Gerando Importar Benefícios...")
+                        df_benef = pd.read_excel(io.BytesIO(base_benef), sheet_name="BENEFICIOS")
+                        modo_key = "sequencial" if modo_all.startswith("IDs") else "esocial"
+                        df_saida, mapa_ids, stats_b = processar_beneficios_df(
+                            df_layout, df_benef, modo=modo_key, ultimo_id=ss["ultimo_id"]
+                        )
+                        xlsx_benef = beneficios_xlsx_bytes(df_saida)
+                        put_art("benef_xlsx", xlsx_benef, "Importar Beneficios.xlsx", XLSX_MIME)
+                        put_art(
+                            "benef_csv",
+                            xlsx_bytes_to_csv_bytes(xlsx_benef),
+                            "Importar Beneficios.csv",
+                            "text/csv",
+                        )
+                        ss["mapa_ids"] = mapa_ids
+                        ss["benef_stats"] = stats_b
+                        if modo_key == "sequencial" and mapa_ids is not None and len(mapa_ids):
+                            ss["ultimo_id"] = int(mapa_ids["novo_id"].max())
+                        st.write(f"   → {stats_b['linhas']} linha(s) de benefício.")
 
-                    # 3) CSVs já gerados acima
-                    st.write("3️⃣ CSVs gerados (texto preservado).")
-                    status.update(label="✅ Pipeline concluído!", state="complete")
-                except Exception as e:
-                    status.update(label="❌ Falha no pipeline", state="error")
-                    st.error(f"Erro: {e}")
+                        # 3) CSVs já gerados acima
+                        st.write("3️⃣ CSVs gerados (texto preservado).")
+                        status.update(label="✅ Pipeline concluído!", state="complete")
+                    except Exception as e:
+                        status.update(label="❌ Falha no pipeline", state="error")
+                        st.error(f"Erro: {e}")
 
-    # Central de downloads — tudo que existe na sessão
-    arts = ss["artifacts"]
-    if arts:
-        st.markdown("---")
-        st.markdown(
-            '<div class="card-title">📦 Central de Downloads</div>'
-            '<div class="card-sub">Clique à vontade — os arquivos já estão prontos, baixar NÃO refaz o processamento.</div>',
-            unsafe_allow_html=True,
-        )
-        grid = [
-            ("dom_limpo_xlsx", "⬇️ Domínio LIMPO (.xlsx)"),
-            ("dupes_xlsx", "⬇️ Relação Duplicados (.xlsx)"),
-            ("layout_xlsx", "⬇️ Importar Layout.xlsx"),
-            ("layout_csv", "⬇️ Importar Layout.csv"),
-            ("benef_xlsx", "⬇️ Importar Beneficios.xlsx"),
-            ("benef_csv", "⬇️ Importar Beneficios.csv"),
-        ]
-        cols = st.columns(3)
-        for i, (k, label) in enumerate(grid):
-            with cols[i % 3]:
-                dl(k, label)
+        # Central de downloads — tudo que existe na sessão
+        arts = ss["artifacts"]
+        if arts:
+            st.markdown("---")
+            st.markdown(
+                '<div class="card-title">📦 Central de Downloads</div>'
+                '<div class="card-sub">Clique à vontade — os arquivos já estão prontos, baixar NÃO refaz o processamento.</div>',
+                unsafe_allow_html=True,
+            )
+            grid = [
+                ("dom_limpo_xlsx", "⬇️ Domínio LIMPO (.xlsx)"),
+                ("dupes_xlsx", "⬇️ Relação Duplicados (.xlsx)"),
+                ("layout_xlsx", "⬇️ Importar Layout.xlsx"),
+                ("layout_csv", "⬇️ Importar Layout.csv"),
+                ("benef_xlsx", "⬇️ Importar Beneficios.xlsx"),
+                ("benef_csv", "⬇️ Importar Beneficios.csv"),
+            ]
+            cols = st.columns(3)
+            for i, (k, label) in enumerate(grid):
+                with cols[i % 3]:
+                    dl(k, label)
 
-st.markdown(
+    st.markdown(
     "<p style='text-align:center;color:#5C6B93;font-size:.8rem;margin-top:24px'>"
     "Importador Domínio → AppLider • Líder Limpe • todas as regras do sistema original preservadas"
     "</p>",
