@@ -35,6 +35,7 @@ from core.beneficios import (
 from core.state import get_ultimo_id, set_ultimo_id
 from core.utils import xlsx_bytes_para_csv_bytes, dataframe_para_xlsx_bytes
 from core.config import carregar_regras
+from core.duplicates import comparar_colaboradores
 from core.gsheets import carregar_beneficios_com_fallback, carregar_mapeamento_com_fallback
 
 
@@ -166,9 +167,9 @@ def _carregar_mapeamento():
 # ══════════════════════════════════════════════════════════════════════════
 # ABAS PRINCIPAIS
 # ══════════════════════════════════════════════════════════════════════════
-tab_layout, tab_benef, tab_csv, tab_tudo, tab_help = st.tabs(
+tab_layout, tab_benef, tab_csv, tab_tudo, tab_dup, tab_help = st.tabs(
     ["1️⃣  Importar Layout", "2️⃣  Benefícios", "3️⃣  Converter para CSV",
-     "⭐  Executar Tudo", "❓ Ajuda"]
+     "⭐  Executar Tudo", "❓ Ajuda", "🧹  Duplicados"]
 )
 
 
@@ -186,6 +187,11 @@ with tab_layout:
     f_dominio = st.file_uploader(
         "📥  Arquivo Domínio (.xls)", type=["xls"], key="up_dominio_t1"
     )
+
+    if "dominio_limpo_xlsx" in st.session_state:
+        if st.checkbox("🧹 Usar o Domínio LIMPO da aba Duplicados (sem duplicados)", key="chk_limpo_tab1"):
+            f_dominio = io.BytesIO(st.session_state["dominio_limpo_xlsx"])
+            f_dominio.name = "dominio_limpo.xlsx"
 
     if st.button("🚀  Gerar Importar Layout", type="primary", key="btn_layout"):
         if not f_dominio:
@@ -402,6 +408,21 @@ with tab_csv:
 # ABA 4 — EXECUTAR TUDO
 # ══════════════════════════════════════════════════════════════════════════
 with tab_tudo:
+    # Downloads persistentes: ficam disponíveis mesmo após clicar/baixar
+    if st.session_state.get("tudo_pronto"):
+        st.markdown("#### 📥 Última geração (continua disponível)")
+        p1, p2 = st.columns(2)
+        p1.download_button("⬇️ Importar Layout.xlsx", data=st.session_state["layout_xlsx"],
+                           file_name="Importar Layout.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           key="dl_tudo_layout")
+        p2.download_button("⬇️ Importar Beneficios.xlsx", data=st.session_state["benef_xlsx"],
+                           file_name="Importar Beneficios.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           key="dl_tudo_benef")
+        st.caption("Os CSVs estão na aba 3. Para gerar novamente, use o botão abaixo.")
+        st.divider()
+
     card_inicio("⭐ Executar todo o fluxo de uma vez")
     st.write("Sobe o Arquivo Domínio, confirma o último ID e o app gera **todos os arquivos**.")
 
@@ -426,6 +447,11 @@ with tab_tudo:
         f"✅ Confirmo que o último ID é **{ultimo_id_all}**",
         value=False, key="conf_tudo",
     ) if usar_seq2 else True
+
+    if "dominio_limpo_xlsx" in st.session_state:
+        if st.checkbox("🧹 Usar o Domínio LIMPO da aba Duplicados (sem duplicados)", key="chk_limpo_tudo"):
+            f_dom_all = io.BytesIO(st.session_state["dominio_limpo_xlsx"])
+            f_dom_all.name = "dominio_limpo.xlsx"
 
     if st.button("⭐  EXECUTAR TUDO", type="primary", key="btn_tudo"):
         if not f_dom_all:
@@ -464,6 +490,7 @@ with tab_tudo:
             st.session_state["layout_xlsx"] = layout_xlsx
             st.session_state["benef_df"] = df_benef
             st.session_state["benef_xlsx"] = benef_xlsx
+            st.session_state["tudo_pronto"] = True
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Colaboradores", len(df))
@@ -510,6 +537,66 @@ with tab_tudo:
 # ══════════════════════════════════════════════════════════════════════════
 # ABA 5 — AJUDA
 # ══════════════════════════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════════════════════════
+# ABA: VERIFICAÇÃO DE DUPLICADOS (Domínio × Sistema interno)
+# ══════════════════════════════════════════════════════════════════════════
+with tab_dup:
+    st.subheader("🧹 Verificação de colaboradores duplicados")
+    st.markdown(
+        "Cruze o **Arquivo Domínio** com a exportação de colaboradores do "
+        "sistema interno (AppLider/EasyApp) para descobrir quem **já está "
+        "cadastrado** — por CPF (principal) ou Nome. O arquivo **limpo** fica "
+        "salvo na sessão para usar nas abas 1 e 4."
+    )
+    col_a, col_b = st.columns(2)
+    with col_a:
+        f_dom_dup = st.file_uploader("Arquivo Domínio", type=["xls", "xlsx"], key="up_dup_dom")
+    with col_b:
+        f_sis_dup = st.file_uploader("Colaboradores do sistema interno", type=["xls", "xlsx"], key="up_dup_sis")
+
+    def _ler_plan_dup(up):
+        dados = up.read()
+        if up.name.lower().endswith(".xlsx"):
+            return pd.read_excel(io.BytesIO(dados), engine="openpyxl")
+        return pd.read_excel(io.BytesIO(dados), engine="xlrd")
+
+    if st.button("🔍 Verificar duplicados", type="primary", key="btn_dup"):
+        if f_dom_dup is None or f_sis_dup is None:
+            st.error("Envie os dois arquivos.")
+        else:
+            try:
+                df_dup, df_limpo, stats = comparar_colaboradores(
+                    _ler_plan_dup(f_dom_dup), _ler_plan_dup(f_sis_dup)
+                )
+                st.session_state["dup_relatorio"] = df_dup
+                st.session_state["dup_stats"] = stats
+                st.session_state["dominio_limpo_xlsx"] = dataframe_para_xlsx_bytes(df_limpo)
+            except Exception as e:
+                st.error("Falha na verificação: " + str(e))
+
+    # Resultados persistem na sessão (não somem após download)
+    if "dup_stats" in st.session_state:
+        stats = st.session_state["dup_stats"]
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("No Domínio", stats["total_dominio"])
+        c2.metric("Já cadastrados", stats["duplicados"])
+        c3.metric("Novos (importar)", stats["novos"])
+        c4.metric("No sistema", stats["total_sistema"])
+        rel = st.session_state["dup_relatorio"]
+        if not rel.empty:
+            st.warning("⚠️ Estes colaboradores JÁ existem no sistema:")
+            st.dataframe(rel, use_container_width=True)
+        else:
+            st.success("✅ Nenhum duplicado encontrado — todos são novos.")
+        st.download_button(
+            "⬇️ Baixar Arquivo Domínio LIMPO (.xlsx)",
+            data=st.session_state["dominio_limpo_xlsx"],
+            file_name="Arquivo Dominio - SEM DUPLICADOS.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_dup_limpo",
+        )
+
 with tab_help:
     card_inicio("Como usar")
     st.markdown("""

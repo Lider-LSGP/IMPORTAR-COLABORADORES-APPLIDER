@@ -31,6 +31,17 @@ from typing import Tuple, List, Dict
 
 import pandas as pd
 
+
+def _ler_excel_auto(dados, **kwargs):
+    """Lê bytes de Excel detectando o formato pelo conteúdo
+    (xlsx = assinatura PK/zip; caso contrário assume .xls)."""
+    buf = io.BytesIO(dados)
+    head = buf.read(4)
+    buf.seek(0)
+    if head[:2] == b"PK":
+        return pd.read_excel(buf, engine="openpyxl", **kwargs)
+    return pd.read_excel(buf, engine="xlrd", **kwargs)
+
 from .utils import (
     formatar_sexo, limpar_documento, limpar_email, normalizar_texto,
     formatar_data, formatar_salario, extrair_mes, extrair_ano,
@@ -186,7 +197,7 @@ def processar_layout(
     """
     regras = regras or RegrasConfig()
     # ─── 4.1 Entradas ──────────────────────────────────────────────────
-    arq_dom = pd.read_excel(io.BytesIO(dominio_bytes), engine="xlrd", dtype=str)
+    arq_dom = _ler_excel_auto(dominio_bytes, dtype=str)
     mapa = carregar_todos_os_mapas(mapeamento_bytes)
 
     arq_lider = pd.DataFrame(columns=LAYOUT_COLUNAS)
