@@ -21,7 +21,7 @@ import calendar
 import io
 import re
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 from openpyxl import load_workbook
@@ -77,49 +77,89 @@ def limpar_email(email) -> str:
 # 3) DATAS
 # ══════════════════════════════════════════════════════════════════════════
 
-def calcular_dias_entre(data_inicio, data_fim) -> str:
+def _parse_data(valor):
     """
-    Diferença em DIAS entre duas datas (para os períodos de experiência).
-    Retorna "" se alguma das datas for vazia/inválida.
+    Converte QUALQUER data do Domínio em datetime.date (ou None).
+
+    Ordem de detecção (evita a troca dia/mês):
+      1. datetime/Timestamp/date -> direto
+      2. "aaaa-mm-dd[ hh:mm:ss]" -> formato EXPLICITO (ISO)
+      3. "dd/mm/aaaa" / "dd-mm-aaaa" -> formato EXPLICITO (BR)
+      4. numero serial do Excel (ex.: 46302) -> epoch 1899-12-30
+      5. fallback tolerante
     """
+    if valor is None:
+        return None
     try:
-        # format="mixed" aceita tanto "01/09/2026" (BR) quanto "2026-09-01"
-        # (ISO — formato que formatar_data devolve dentro do pipeline)
-        d1 = pd.to_datetime(data_inicio, format="mixed", dayfirst=True, errors="coerce")
-        d2 = pd.to_datetime(data_fim, format="mixed", dayfirst=True, errors="coerce")
-        if pd.isna(d1) or pd.isna(d2):
-            return ""
-        return str((d2 - d1).days)
+        if pd.isna(valor):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
+        return valor
+
+    s = str(valor).strip()
+    if s == "" or s.lower() in {"nan", "nat", "none"}:
+        return None
+
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", s)
+    if m:
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+
+    m = re.match(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$", s)
+    if m:
+        d, mo, a = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if a < 100:
+            a += 2000 if a < 50 else 1900
+        try:
+            return date(a, mo, d)
+        except ValueError:
+            return None
+
+    try:
+        num = float(s.replace(",", "."))
+        if 1 <= num <= 2958465:
+            return date(1899, 12, 30) + timedelta(days=int(num))
+    except ValueError:
+        pass
+
+    try:
+        return pd.to_datetime(s, format="mixed", dayfirst=True).date()
     except Exception:
+        return None
+
+
+def calcular_dias_entre(data_inicio, data_fim) -> str:
+    d1, d2 = _parse_data(data_inicio), _parse_data(data_fim)
+    if d1 is None or d2 is None:
         return ""
+    return str((d2 - d1).days)
 
 
 def formatar_data(valor) -> str | None:
-    try:
-        return pd.to_datetime(valor, dayfirst=True).strftime("%Y-%m-%d")
-    except Exception:
-        return None
+    d = _parse_data(valor)
+    return d.strftime("%Y-%m-%d") if d else None
 
 
 def extrair_mes(valor):
-    try:
-        return pd.to_datetime(valor, dayfirst=True).strftime("%m")
-    except Exception:
-        return None
+    d = _parse_data(valor)
+    return d.strftime("%m") if d else None
 
 
 def extrair_ano(valor):
-    try:
-        return pd.to_datetime(valor, dayfirst=True).strftime("%Y")
-    except Exception:
-        return None
+    d = _parse_data(valor)
+    return d.strftime("%Y") if d else None
 
 
 def extrair_mes_ano(valor):
-    try:
-        return pd.to_datetime(valor, dayfirst=True).strftime("%m/%Y")
-    except Exception:
-        return None
+    d = _parse_data(valor)
+    return d.strftime("%m/%Y") if d else None
 
 
 def calcular_idade(data_nascimento, referencia: datetime | None = None) -> float | None:
@@ -127,12 +167,12 @@ def calcular_idade(data_nascimento, referencia: datetime | None = None) -> float
     Idade exata (em anos, com fração) na data de referência (padrão: hoje).
     Retorna None se a data de nascimento for inválida/vazia.
     """
-    try:
-        nasc = pd.to_datetime(data_nascimento, dayfirst=True)
-        ref = referencia or datetime.now()
-        return (ref - nasc).days / 365.25
-    except Exception:
+    nasc_d = _parse_data(data_nascimento)
+    if nasc_d is None:
         return None
+    nasc = datetime.combine(nasc_d, datetime.min.time())
+    ref = referencia or datetime.now()
+    return (ref - nasc).days / 365.25
 
 
 def eh_menor_de_idade(data_nascimento, referencia: datetime | None = None) -> bool:
@@ -189,7 +229,7 @@ def calcular_variacao_escala(data_adm_str) -> str:
     if pd.isna(data_adm_str) or str(data_adm_str).strip() == "":
         return "12x36"
     try:
-        data_adm = pd.to_datetime(data_adm_str, dayfirst=True)
+        data_adm = pd.Timestamp(_parse_data(data_adm_str))
         hoje = datetime.now()
         paridade = "P" if data_adm.day % 2 == 0 else "I"
         ano, mes = data_adm.year, data_adm.month
